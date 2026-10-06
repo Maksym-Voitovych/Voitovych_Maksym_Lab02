@@ -52,3 +52,4 @@ bank_system/
         ├── analytics.py   # Аналітика та статистика
         └── decorators.py  # Декоратори логування</text>
 ```
+>>>>>>> 651213db8cb487a613562d79be94180ffda0ea54
