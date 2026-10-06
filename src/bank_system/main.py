@@ -1,103 +1,129 @@
 import sys
-from bank_system.services import BankService
-
+from bank_system.data import create_account, get_sample_accounts
+from bank_system.processors import (
+    build_account_index, find_account, 
+    create_min_balance_filter, filter_accounts, universal_sort
+)
+from bank_system.analytics import (
+    group_accounts_by_type, calculate_total_balance,
+    get_average_balance, get_max_balance_account,
+    get_account_type_stats, add_to_history, get_history
+)
 
 def display_menu() -> None:
     print("\n=== СИСТЕМА БАНКІВСЬКИХ РАХУНКІВ ===")
-    print("1. Створити новий рахунок")
-    print("2. Поповнити рахунок")
-    print("3. Списати кошти з рахунку")
-    print("4. Перевірити баланс рахунку")
-    print("5. Пошук рахунку за номером або ім'ям")
-    print("6. Показати загальну суму коштів у банку")
-    print("7. Вийти з програми")
-
+    print("1. Створити новий рахунок (**kwargs)")
+    print("2. Поповнити / Списати кошти")
+    print("3. Знайти рахунок (Dict index)")
+    print("4. Переглянути загальну статистику (*args, Generator)")
+    print("5. Статистика типів рахунків (Counter)")
+    print("6. Фільтрація за мін. балансом (Closure)")
+    print("7. Універсальне сортування (за будь-яким полем)")
+    print("8. Переглянути історію останніх операцій (deque)")
+    print("9. Вийти з програми")
 
 def main() -> None:
-    bank_service = BankService()
-
-    # Початкові тестові дані
-    bank_service.create_account("UA1001", "Шевченко Тарас", 1500.0)
-    bank_service.create_account("UA1002", "Українка Леся", 3200.5)
+    accounts = get_sample_accounts()
 
     while True:
         display_menu()
-        choice = input("Оберіть дію (1-7): ").strip()
+        choice = input("Оберіть дію (1-9): ").strip()
 
         if choice == "1":
-            acc_num = input("Введіть номер рахунку (наприклад, UA1003): ").strip()
-            owner = input("Введіть ПІБ власника: ").strip()
+            acc_num = input("Номер рахунку: ").strip()
+            owner = input("ПІБ власника: ").strip()
+            acc_type = input("Тип (Checking/Savings/Credit/Deposit): ").strip()
             try:
-                initial_bal = float(input("Введіть початковий баланс (грн): "))
-                acc = bank_service.create_account(acc_num, owner, initial_bal)
-                print(f"Успішно створено рахунок {acc.account_number} для {acc.owner_name}!")
+                initial_bal = float(input("Початковий баланс: "))
+                new_acc = create_account(
+                    account_number=acc_num, 
+                    client_name=owner, 
+                    balance=initial_bal, 
+                    account_type=acc_type
+                )
+                accounts.append(new_acc)
+                add_to_history(f"Створено рахунок {acc_num} ({owner})")
+                print(f"Створено рахунок {acc_num}!")
             except ValueError as err:
-                print(f"Помилка створення: {err}")
+                print(f"Помилка: {err}")
 
         elif choice == "2":
             acc_num = input("Введіть номер рахунку: ").strip()
-            acc = bank_service.find_account_by_number(acc_num)
+            index = build_account_index(accounts)
+            acc = find_account(index, acc_num)
             if not acc:
                 print("Рахунок не знайдено.")
                 continue
+            
+            action = input("1 - Поповнити, 2 - Списати: ").strip()
             try:
-                amount = float(input("Введіть суму поповнення (грн): "))
-                acc.deposit(amount)
-                print(f"Рахунок поповнено! Поточний баланс: {acc.balance:.2f} грн.")
-            except ValueError as err:
-                print(f"Помилка: {err}")
+                amount = float(input("Сума: "))
+                if action == "1":
+                    acc['balance'] += amount
+                    add_to_history(f"Поповнення {acc_num} на {amount} грн")
+                    print(f"Новий баланс: {acc['balance']:.2f} грн")
+                elif action == "2":
+                    if acc['balance'] < amount:
+                        print("Недостатньо коштів.")
+                    else:
+                        acc['balance'] -= amount
+                        add_to_history(f"Списання {acc_num} на {amount} грн")
+                        print(f"Новий баланс: {acc['balance']:.2f} грн")
+            except ValueError:
+                print("Некоректне число.")
 
         elif choice == "3":
-            acc_num = input("Введіть номер рахунку: ").strip()
-            acc = bank_service.find_account_by_number(acc_num)
-            if not acc:
-                print("Рахунок не знайдено.")
-                continue
-            try:
-                amount = float(input("Введіть суму списання (грн): "))
-                acc.withdraw(amount)
-                print(f"Списання успішне! Новий баланс: {acc.balance:.2f} грн.")
-            except ValueError as err:
-                print(f"Помилка: {err}")
+            query = input("Введіть номер або ім'я: ").strip()
+            index = build_account_index(accounts)
+            found = find_account(index, query)
+            if found:
+                print(f"Знайдено: {found['account_number']} | {found['client_name']} | {found['balance']} грн")
+            else:
+                print("Нічого не знайдено.")
 
         elif choice == "4":
-            acc_num = input("Введіть номер рахунку: ").strip()
-            acc = bank_service.find_account_by_number(acc_num)
-            if acc:
-                print(f"Рахунок: {acc.account_number} | Власник: {acc.owner_name} | Баланс: {acc.balance:.2f} грн.")
-            else:
-                print("Рахунок не знайдено.")
+            total = calculate_total_balance(*(a["balance"] for a in accounts))
+            avg = get_average_balance(accounts)
+            max_acc = get_max_balance_account(accounts)
+            print(f"\nЗагальна сума: {total:.2f} грн")
+            print(f"Середній баланс: {avg:.2f} грн")
+            print(f"Найбільший баланс: {max_acc.get('client_name')} ({max_acc.get('balance')} грн)")
 
         elif choice == "5":
-            query = input("Введіть номер рахунку або ім'ям клієнта для пошуку: ").strip()
-            by_num = bank_service.find_account_by_number(query)
-            by_name = bank_service.search_accounts_by_owner(query)
-
-            found_accounts = []
-            if by_num:
-                found_accounts.append(by_num)
-            for acc in by_name:
-                if acc not in found_accounts:
-                    found_accounts.append(acc)
-
-            if found_accounts:
-                print("\nЗнайдені рахунки:")
-                for acc in found_accounts:
-                    print(f"- {acc.account_number} ({acc.owner_name}): {acc.balance:.2f} грн.")
-            else:
-                print("Рахунків за вашим запитом не знайдено.")
+            stats = get_account_type_stats(accounts)
+            print("\nКількість рахунків за типами (Counter):")
+            for acc_type, count in stats.items():
+                print(f" - {acc_type}: {count}")
 
         elif choice == "6":
-            total = bank_service.get_total_funds()
-            print(f"\nЗагальна сума коштів усіх клієнтів у банку: {total:.2f} грн.")
+            try:
+                min_val = float(input("Мінімальний баланс: "))
+                min_filter = create_min_balance_filter(min_val)
+                filtered = filter_accounts(accounts, min_filter)
+                print(f"Знайдено {len(filtered)} рахунків:")
+                for a in filtered:
+                    print(f" - {a['client_name']}: {a['balance']} грн")
+            except ValueError:
+                print("Некоректне число.")
 
         elif choice == "7":
-            print("Завершення роботи системи. До побачення!")
+            field = input("Введіть поле для сортування (balance / client_name / account_type): ").strip()
+            sorted_accs = universal_sort(accounts, key=field, reverse=True)
+            print(f"\nСортування за полем '{field}':")
+            for a in sorted_accs:
+                print(f" - {a['client_name']} ({a['account_type']}): {a['balance']} грн")
+
+        elif choice == "8":
+            history = get_history()
+            print("\nІсторія останніх операцій (до 5 дій):")
+            if not history:
+                print("Історія порожня.")
+            for i, h in enumerate(history, 1):
+                print(f"{i}. {h}")
+
+        elif choice == "9":
+            print("Вихід з програми.")
             sys.exit(0)
-
-        else:
-            print("Некоректний вибір. Спробуйте ще раз.")
-
 
 if __name__ == "__main__":
     main()
